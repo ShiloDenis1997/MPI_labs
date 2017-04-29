@@ -3,9 +3,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-//void MatrixMultiplicationMPI(double *&A, double *&B, double *&C, int &Size);
 int **alloc_2d_int(int rows, int cols);
-void copyArray(int* destAr, int* sourceAr, int n);
+void copyBlock(int** destBlock, int** sourceBlock, int rows, int cols);
 int countLeftProcessRank(int myrank, int processCount)
 {
 	return (myrank + processCount - 1) % processCount;
@@ -23,10 +22,35 @@ void printMatrix(int** matr, int rowsCount, int colsCount)
 	{
 		for (j = 0; j < colsCount; j++)
 		{
-			printf("%d", matr[i][j]);
+			printf("%d ", matr[i][j]);
 		}
 		printf("\n");
 	}
+}
+
+void MultipleMatrixes(int** matrA, int** matrB, int** matrC, int rowsA, int colsA, int rowsB, int colsB)
+{
+	int rowsC = rowsA;
+	int colsC = colsB;
+	int i, j, q;
+	for (i = 0; i < rowsC; i++)
+	{
+		for (j = 0; j < colsC; j++)
+		{
+			matrC[i][j] = 0;
+		}
+	}
+	
+	for (i = 0; i < rowsC; i++)
+	{
+		for (j = 0; j < colsC; j++)
+		{
+			for (q = 0; q < colsA; q++)
+			{
+				matrC[i][j] += matrA[i][q] * matrB[q][j];
+			}
+		}
+	}	
 }
 
 int main(int argc, char** argv)
@@ -43,9 +67,8 @@ int main(int argc, char** argv)
 	int procCount = atoi(argv[3]); // count of processes
 	
 	int rowsInRowBlock, rowsInColBlock, colsInRowBlock, colsInColBlock;
-	int elementsInRowBlockCount = rowsInRowBlock * colsInRowBlock;
-	int elementsInColBlockCount = rowsInColBlock * colsInColBlock;
 	int leftProcessRank, rightProcessRank;
+	int currentColBlockNumber;
 	
 	MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
 	leftProcessRank = countLeftProcessRank(myrank, procCount);
@@ -56,20 +79,26 @@ int main(int argc, char** argv)
 	rowsInColBlock = rowsCountB;
 	colsInColBlock = colsCountB / procCount;
 	
+	int elementsInRowBlockCount = rowsInRowBlock * colsInRowBlock;
+	int elementsInColBlockCount = rowsInColBlock * colsInColBlock;
+	int elementsInRowBlockC = rowsInRowBlock * colsCountB;
+	
 	int** rowBlockA = alloc_2d_int(rowsInRowBlock, colsInRowBlock);
 	int** colBlockB = alloc_2d_int(rowsInColBlock, colsInColBlock);
 	int** rowBlockC = alloc_2d_int(rowsInRowBlock, colsCountB);
 
 	int** tempSendCol = alloc_2d_int(rowsInColBlock, colsInColBlock);
 	int** tempRecvCol = alloc_2d_int(rowsInColBlock, colsInColBlock);
+	int** countedCRectangle = alloc_2d_int(rowsInRowBlock, colsInColBlock);
+	
+	MPI_Request sendColBlockRequest = MPI_REQUEST_NULL;
+	MPI_Request recvColBlockRequest = MPI_REQUEST_NULL;
+	MPI_Status sendRowStatus;
+	MPI_Status recvRowStatus;
 	
 	MPI_Datatype rowBlockType;
 	MPI_Datatype localColType;
 	MPI_Datatype colBlockType;
-	// MPI_Request sendRowRequest = MPI_REQUEST_NULL;
-	// MPI_Request recvRowRequest = MPI_REQUEST_NULL;
-	// MPI_Status sendRowStatus;
-	// MPI_Status recvRowStatus;
 	MPI_Type_vector(rowsCountB, colsInColBlock, colsCountB, MPI_INT, &localColType); // creating column block type
 	MPI_Type_create_resized(localColType, 0, sizeof(int) * colsInColBlock, &colBlockType);// creating column type
 	MPI_Type_commit(&colBlockType);
@@ -120,78 +149,81 @@ int main(int argc, char** argv)
 		MPI_Scatter(NULL, 1, colBlockType, *colBlockB, elementsInColBlockCount, MPI_INT, 0, MPI_COMM_WORLD);
 	}	
 	
-	// // j = myrank;
-	// // for (i = 0; i < n; i++)
-	// // {
-		// // int nextColNum;
-		// // if (i)
-		// // {
-			// // //wait recv row
-			// // MPI_Wait(&recvRowRequest, &recvRowStatus);
-			// // copyArray(colBlockB, tempRecvRow, n);
-		// // }
-		
-		// // nextColNum = j - 1;
-		// // if (nextColNum < 0)
-		// // {
-			// // nextColNum += n;
-		// // }
-		
-		// // if (i + 1 < n)
-		// // {
-			// // MPI_Irecv(tempRecvRow, 1, rowBlockType, leftRank, nextColNum, MPI_COMM_WORLD, &recvRowRequest);
-		// // }
-		
-		// // rowBlockC[j] = 0;
-		// // for (k = 0; k < n; k++)
-		// // {
-			// // rowBlockC[j] += rowBlockA[k] * colBlockB[k];
-		// // }
-		
-		// // if (i)
-		// // {
-			// // MPI_Wait(&sendRowRequest, &sendRowStatus);
-		// // }
-		
-		// // copyArray(tempSendRow, colBlockB, n);
-		// // if (i + 1 < n)
-		// // {
-			// // MPI_Isend(tempSendRow, 1, rowBlockType, rightRank, j, MPI_COMM_WORLD, &sendRowRequest);
-		// // }
-		
-		// // j = nextColNum;
-	// // }
-	// // if (!myrank)
-	// // {
-		// // int** matrC;
-		// // FILE* output;
-		// // matrC = alloc_2d_int(n, n);
-		// // MPI_Gather(rowBlockC, n, MPI_INT, matrC[0], n, MPI_INT, 0, MPI_COMM_WORLD);
-		// // output = fopen("output.txt", "w");
-		// // for (i = 0; i < n; i++)
-		// // {
-			// // for (j = 0; j < n; j++)
-			// // {
-				// // fprintf(output, "%d ", matrC[i][j]);
-			// // }
-			
-			// // fprintf(output, "\n");
-		// // }
-		// // free(matrC[0]);
-		// // free(matrC);
-	// // }
-	// // if (myrank)
-	// // {
-		// // MPI_Gather(rowBlockC, n, MPI_INT, NULL, n, MPI_INT, 0, MPI_COMM_WORLD);
-	// // }
+	currentColBlockNumber = myrank;
 	
-	// MPI_Type_free(&rowBlockType);
-	// MPI_Type_free(&colBlockType);
-	// // free(tempRecvRow);
-	// // free(tempSendRow);
-	// // free(rowBlockA);
-	// // free(colBlockB);
-	// // free(rowBlockC);
+	for (i = 0; i < procCount; i++)
+	{
+		int wantedColBlockNumber;
+		if (i)
+		{
+			//wait recv row
+			MPI_Wait(&recvColBlockRequest, &recvRowStatus);
+			copyBlock(colBlockB, tempRecvCol, rowsInColBlock, colsInColBlock);
+		}
+		
+		if (i + 1 < procCount)
+		{
+			if (i)
+			{
+				MPI_Wait(&sendColBlockRequest, &sendRowStatus);
+			}
+			copyBlock(tempSendCol, colBlockB, rowsInColBlock, colsInColBlock);
+			MPI_Isend(*tempSendCol, elementsInColBlockCount, MPI_INT, rightProcessRank, currentColBlockNumber, MPI_COMM_WORLD, &sendColBlockRequest);
+		}
+		
+		wantedColBlockNumber = countLeftProcessRank(currentColBlockNumber, procCount);
+		
+		if (i + 1 < procCount)
+		{
+			MPI_Irecv(*tempRecvCol, elementsInColBlockCount, MPI_INT, leftProcessRank, wantedColBlockNumber, MPI_COMM_WORLD, &recvColBlockRequest);
+		}
+		
+		MultipleMatrixes(rowBlockA, colBlockB, countedCRectangle, rowsInRowBlock, colsInRowBlock, rowsInColBlock, colsInColBlock);
+		{
+			int i1, j1;
+			for (i1 = 0; i1 < rowsInRowBlock; i1++)
+			{
+				for (j1 = 0; j1 < colsInColBlock; j1++)
+				{
+					rowBlockC[i1][j1 + currentColBlockNumber * colsInColBlock] = countedCRectangle[i1][j1];
+				}
+			}
+		}
+		
+		currentColBlockNumber = wantedColBlockNumber;
+	}
+	
+	if (!myrank)
+	{
+		int** matrC;
+		FILE* output;
+		matrC = alloc_2d_int(rowsCountA, colsCountB);
+		MPI_Gather(*rowBlockC, elementsInRowBlockC, MPI_INT, *matrC, elementsInRowBlockC, MPI_INT, 0, MPI_COMM_WORLD);
+		output = fopen("output.txt", "w");
+		for (i = 0; i < rowsCountA; i++)
+		{
+			for (j = 0; j < colsCountB; j++)
+			{
+				fprintf(output, "%d ", matrC[i][j]);
+			}
+			
+			fprintf(output, "\n");
+		}
+		free(matrC[0]);
+		free(matrC);
+	}
+	else
+	{
+		MPI_Gather(*rowBlockC, elementsInRowBlockC, MPI_INT, NULL, elementsInRowBlockC, MPI_INT, 0, MPI_COMM_WORLD);
+	}
+	
+	MPI_Type_free(&rowBlockType);
+	MPI_Type_free(&colBlockType);
+	free(tempRecvCol);
+	free(tempSendCol);
+	free(rowBlockA);
+	free(colBlockB);
+	free(rowBlockC);
 	MPI_Finalize();
 	return 0;
 }
@@ -206,11 +238,12 @@ int **alloc_2d_int(int rows, int cols) {
     return array;
 }
 
-void copyArray(int* destAr, int* sourceAr, int n)
+void copyBlock(int** destBlock, int** sourceBlock, int rows, int cols)
 {
-	int q;
-	for (q = 0; q < n; q++)
-	{
-		destAr[q] = sourceAr[q];
-	}
+	int i, j;
+	for (i = 0; i < rows; i++)
+		for (j = 0; j < cols; j++)
+		{
+			destBlock[i][j] = sourceBlock[i][j];
+		}
 }
