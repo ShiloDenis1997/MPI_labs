@@ -43,10 +43,11 @@ void MultipleMatrixes(int** matrA, int** matrB, int** matrC, int rowsA, int cols
 	
 	for (i = 0; i < rowsC; i++)
 	{
-		for (j = 0; j < colsC; j++)
+		for (q = 0; q < colsA; q++)
 		{
-			for (q = 0; q < colsA; q++)
+			for (j = 0; j < colsC; j++)
 			{
+
 				matrC[i][j] += matrA[i][q] * matrB[q][j];
 			}
 		}
@@ -156,7 +157,6 @@ int main(int argc, char** argv)
 		int wantedColBlockNumber;
 		if (i)
 		{
-			//wait recv row
 			MPI_Wait(&recvColBlockRequest, &recvRowStatus);
 			copyBlock(colBlockB, tempRecvCol, rowsInColBlock, colsInColBlock);
 		}
