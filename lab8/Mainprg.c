@@ -1,4 +1,5 @@
 #include <mpi.h>
+#include <omp.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -37,13 +38,13 @@ void MultipleMatrixes(int** matrA, int** matrB, int** matrC, int rowsA, int cols
 	int colsC = colsB;
 	int i, j, q;
 	
+	#pragma omp parallel for
 	for (i = 0; i < rowsC; i++)
 	{
 		for (q = 0; q < colsA; q++)
 		{
 			for (j = 0; j < colsC; j++)
 			{
-
 				matrC[i][j] += matrA[i][q] * matrB[q][j];
 			}
 		}
@@ -77,6 +78,18 @@ int getGroups(MPI_Comm cartComm, MPI_Comm rowComm, MPI_Group* cartGroup, MPI_Gro
 	MPI_Comm_group(rowComm, rowGroup);		
 }
 
+int getWantedRowRank(int* coord, int iter, int sqrtProcCount, int* rowRanks, MPI_Comm cartComm, int* wantedCartRank)
+{
+	int wantedCoords[2];
+	wantedCoords[0] = coord[0];
+	int wantedColBlockNumber = (coord[0] + iter) % sqrtProcCount;
+	wantedCoords[1] = wantedColBlockNumber;
+	int wantedRowRank;
+	MPI_Cart_rank(cartComm, wantedCoords, wantedCartRank);
+	wantedRowRank = rowRanks[*wantedCartRank];
+	return wantedRowRank;
+}
+
 int main(int argc, char** argv)
 {
 	int myrank;
@@ -105,11 +118,6 @@ int main(int argc, char** argv)
 		
 	createTopology(&cartComm, &rowComm, &colComm, sqrtProcCount);
 	
-
-	// int rowsInRowBlock, rowsInColBlock, colsInRowBlock, colsInColBlock;
-	// int leftProcessRank, rightProcessRank;
-	// int currentColBlockNumber;
-	
 	int ARowsInBlock, AColsInBlock, BRowsInBlock, BColsInBlock, CRowsInBlock, CColsInBlock;
 	
 	ARowsInBlock = ATotalRows / sqrtProcCount;
@@ -122,9 +130,6 @@ int main(int argc, char** argv)
 	int ABlockElementsCount = ARowsInBlock * AColsInBlock;
 	int BBlockElementsCount = BRowsInBlock * BColsInBlock;
 	int CBlockElementsCount = CRowsInBlock * CColsInBlock;
-	
-	// leftProcessRank = countLeftProcessRank(myrank, sqrtProcCount);
-	// rightProcessRank = countRightProcessRank(myrank, sqrtProcCount);
 	
 	int** aBlock = alloc_2d_int(ARowsInBlock, AColsInBlock);
 	int** bBlock = alloc_2d_int(BRowsInBlock, BColsInBlock);
@@ -180,15 +185,6 @@ int main(int argc, char** argv)
 			cDispls[k] = cDispls[k - 1] + 1 + (CRowsInBlock - 1) * sqrtProcCount;
 		}
 	}
-	
-	// int** tempSendCol = alloc_2d_int(rowsInColBlock, colsInColBlock);
-	// int** tempRecvCol = alloc_2d_int(rowsInColBlock, colsInColBlock);
-	// int** countedCRectangle = alloc_2d_int(rowsInRowBlock, colsInColBlock);
-	
-	// MPI_Request sendColBlockRequest = MPI_REQUEST_NULL;
-	// MPI_Request recvColBlockRequest = MPI_REQUEST_NULL;
-	// MPI_Status sendRowStatus;
-	// MPI_Status recvRowStatus;
 	
 	MPI_Datatype aBlockType;
 	MPI_Datatype aLocalBlock;
@@ -266,15 +262,13 @@ int main(int argc, char** argv)
 	
 	MPI_Group_translate_ranks(cartGroup, procCount, cartRanks, rowGroup, rowRanks);
 	MPI_Status bBlockRecvStatus;
+	MPI_Status aBlockBcastStatus;
+	
+	int wantedCartRank, wantedRowRank;
 	
 	for (i = 0; i < sqrtProcCount; i++)
 	{
-		int wantedColBlockNumber = (coord[0] + i) % sqrtProcCount;
-		wantedCoords[1] = wantedColBlockNumber;
-		int wantedCartRank;
-		int wantedRowRank;
-		MPI_Cart_rank(cartComm, wantedCoords, &wantedCartRank);
-		wantedRowRank = rowRanks[wantedCartRank];
+		wantedRowRank = getWantedRowRank(coord, i, sqrtProcCount, rowRanks, cartComm, &wantedCartRank);
 		
 		if (wantedCartRank == myCartRank)
 		{
@@ -299,60 +293,13 @@ int main(int argc, char** argv)
 			MPI_Send(*bBlockBuffer, BBlockElementsCount, MPI_INT, toRank, 10, cartComm);
 			MPI_Recv(*bBlock, BBlockElementsCount, MPI_INT, fromRank, 10, cartComm, &bBlockRecvStatus);
 		}
-		// if (wantedCoords[1] == coord[1]) //i need to send
-		// {
-		//		int rankInRowComm = getRankInRowComm(wantedCoords, cartComm, rowComm);
-		// }
-		// else
-		// {
-			// //i recv block
-		// }
-		
-		// int wantedColBlockNumber;
-		// if (i)
-		// {
-			// MPI_Wait(&recvColBlockRequest, &recvRowStatus);
-			// copyBlock(colBlockB, tempRecvCol, rowsInColBlock, colsInColBlock);
-		// }
-		
-		
-		// if (i + 1 < sqrtProcCount)
-		// {
-			// if (i)
-			// {
-				// MPI_Wait(&sendColBlockRequest, &sendRowStatus);
-			// }
-			// copyBlock(tempSendCol, colBlockB, rowsInColBlock, colsInColBlock);
-			// MPI_Isend(*tempSendCol, elementsInColBlockCount, MPI_INT, rightProcessRank, currentColBlockNumber, MPI_COMM_WORLD, &sendColBlockRequest);
-		// }
-		
-		// wantedColBlockNumber = countLeftProcessRank(currentColBlockNumber, sqrtProcCount);
-		
-		// if (i + 1 < sqrtProcCount)
-		// {
-			// MPI_Irecv(*tempRecvCol, elementsInColBlockCount, MPI_INT, leftProcessRank, wantedColBlockNumber, MPI_COMM_WORLD, &recvColBlockRequest);
-		// }
-		
-		// MultipleMatrixes(rowBlockA, colBlockB, countedCRectangle, rowsInRowBlock, colsInRowBlock, rowsInColBlock, colsInColBlock);
-		// {
-			// int i1, j1;
-			// for (i1 = 0; i1 < rowsInRowBlock; i1++)
-			// {
-				// for (j1 = 0; j1 < colsInColBlock; j1++)
-				// {
-					// rowBlockC[i1][j1 + currentColBlockNumber * colsInColBlock] = countedCRectangle[i1][j1];
-				// }
-			// }
-		// }
-		
-		// currentColBlockNumber = wantedColBlockNumber;
 	}
 	
-			if (coord[0] == 0 && coord[1] == 0){
-			printMatrix(aBlockBuffer, ARowsInBlock, AColsInBlock);
-			printMatrix(bBlock, BRowsInBlock, BColsInBlock);
-			printMatrix(cBlock, CRowsInBlock, CColsInBlock);
-		}
+	if (coord[0] == 0 && coord[1] == 0){
+		printMatrix(aBlockBuffer, ARowsInBlock, AColsInBlock);
+		printMatrix(bBlock, BRowsInBlock, BColsInBlock);
+		printMatrix(cBlock, CRowsInBlock, CColsInBlock);
+	}
 	
 	if (!myrank)
 	{
@@ -378,11 +325,6 @@ int main(int argc, char** argv)
 		MPI_Gatherv(*cBlock, CBlockElementsCount, MPI_INT, NULL, NULL, NULL, NULL, mainCartRank, cartComm);
 	}
 	
-	// free(tempRecvCol);
-	// free(tempSendCol);
-	// free(rowBlockA);
-	// free(colBlockB);
-	// free(rowBlockC);
 	MPI_Group_free(&cartGroup);
 	MPI_Group_free(&rowGroup);
 	MPI_Type_free(&aBlockType);
